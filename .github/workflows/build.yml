@@ -55,16 +55,10 @@ jobs:
           sudo apt update || true
           sudo apt install -y libxrandr-dev libxinerama-dev libxcursor-dev mesa-common-dev libx11-xcb-dev pkg-config nodejs npm cmake ninja-build clang python3 git curl zip || true
 
-      - name: Install depot_tools
+      - name: Clone Dawn source
         run: |
-          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
-
-      - name: Fetch Dawn source
-        run: |
-          mkdir dawn && cd dawn
-          fetch dawn
-          cd src
+          git clone https://dawn.googlesource.com/dawn dawn
+          cd dawn
           git checkout tags/${{ needs.get-latest-tag.outputs.latest_tag }}
 
       - name: CMake configure
