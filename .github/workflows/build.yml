@@ -16,10 +16,10 @@ jobs:
       - name: Fetch upstream tags
         run: |
           git ls-remote --tags https://dawn.googlesource.com/dawn \
-            | grep -v '\^{}' \
+            | grep '^.*refs/heads/chromium/[0-9]\+\(_[0-9]\+\)\?$' \
             | awk '{print $2}' \
-            | sed 's@refs/tags/@@' \
-            | sort -V \
+            | sed 's@refs/heads/chromium/@@' \
+            | sort -t '_' -k1,1n -k2,2n \
             | tail -n1 > latest_tag.txt
 
       - name: Check if tag already released
