@@ -1,0 +1,100 @@
+name: Build latest Dawn tag (CMake)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  get-latest-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      latest_tag: ${{ steps.get-tag.outputs.latest_tag }}
+      should_build: ${{ steps.get-tag.outputs.should_build }}
+
+    steps:
+      - name: Fetch upstream tags
+        run: |
+          git ls-remote --tags https://dawn.googlesource.com/dawn \
+            | grep -v '\^{}' \
+            | awk '{print $2}' \
+            | sed 's@refs/tags/@@' \
+            | sort -V \
+            | tail -n1 > latest_tag.txt
+
+      - name: Check if tag already released
+        id: get-tag
+        run: |
+          latest_tag=$(cat latest_tag.txt)
+          echo "Latest tag: $latest_tag"
+
+          exists=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/tags/$latest_tag | jq -r '.id // empty')
+
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+          if [ -z "$exists" ]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: get-latest-tag
+    if: needs.get-latest-tag.outputs.should_build == 'true'
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    name: Build ${{ needs.get-latest-tag.outputs.latest_tag }} on ${{ matrix.os }}
+
+    steps:
+      - name: Install dependencies (non-Windows)
+        if: matrix.os != 'windows-latest'
+        run: |
+          sudo apt update || true
+          sudo apt install -y libxrandr-dev libxinerama-dev libxcursor-dev mesa-common-dev libx11-xcb-dev pkg-config nodejs npm cmake ninja-build clang python3 git curl zip || true
+
+      - name: Install depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$GITHUB_WORKSPACE/depot_tools" >> $GITHUB_PATH
+
+      - name: Fetch Dawn source
+        run: |
+          mkdir dawn && cd dawn
+          fetch dawn
+          cd src
+          git checkout tags/${{ needs.get-latest-tag.outputs.latest_tag }}
+
+      - name: CMake configure
+        run: |
+          cd dawn
+          cmake -B build -GNinja -DDAWN_FETCH_DEPENDENCIES=ON -DDAWN_ENABLE_INSTALL=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=install
+
+      - name: CMake build
+        run: |
+          cd dawn
+          cmake --build build --config Release
+
+      - name: Package
+        run: |
+          cd dawn/build/install
+          zip -r dawn-${{ needs.get-latest-tag.outputs.latest_tag }}-${{ matrix.os }}.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.get-latest-tag.outputs.latest_tag }}
+          name: Dawn ${{ needs.get-latest-tag.outputs.latest_tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.get-latest-tag.outputs.latest_tag }}
+          files: dawn/build/dawn-${{ needs.get-latest-tag.outputs.latest_tag }}-${{ matrix.os }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
