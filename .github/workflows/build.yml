@@ -158,7 +158,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           cd dawn-source
-          $installDir = Join-Path $PWD "dawn-install"
+          $installDir = Join-Path (Get-Location) ".." "dawn-install"
           cmake -B out/Release `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_INSTALL_PREFIX="$installDir" `
