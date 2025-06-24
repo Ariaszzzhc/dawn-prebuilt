@@ -119,6 +119,8 @@ jobs:
       run: |
         echo "BRANCH_NAME=${{ needs.check-new-branches.outputs.latest-branch }}" >> $GITHUB_ENV
         echo "VERSION=${{ needs.check-new-branches.outputs.latest-version }}" >> $GITHUB_ENV
+        # 创建安全的文件名（将斜杠替换为连字符）
+        echo "SAFE_BRANCH_NAME=$(echo "${{ needs.check-new-branches.outputs.latest-branch }}" | sed 's|/|-|g')" >> $GITHUB_ENV
 
     - name: Clone Dawn repository
       run: |
@@ -165,14 +167,15 @@ jobs:
         echo "..."
         echo "Total files: $(find dawn-install -type f | wc -l)"
         
-        # 创建压缩包
-        tar -czf dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz dawn-install/
+        # 使用安全的文件名创建压缩包
+        echo "Creating package with name: dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz"
+        tar -czf dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz dawn-install/
         
         # 计算文件哈希
-        sha256sum dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz > dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
+        sha256sum dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz > dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz.sha256
         
         # 显示包大小
-        ls -lh dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
+        ls -lh dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
