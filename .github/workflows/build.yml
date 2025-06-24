@@ -120,6 +120,12 @@ jobs:
           brew update
           brew install cmake ninja python pkg-config node
 
+      - name: Update Windows SDK (Windows)
+        if: runner.os == 'Windows'
+        uses: GuillaumeFalourd/setup-windows10-sdk-action@v2.4
+        with:
+          sdk-version: 26100
+
       - name: Setup dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -158,7 +164,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$installDir" `
             -DDAWN_FETCH_DEPENDENCIES=ON `
             -DDAWN_ENABLE_INSTALL=ON `
-            -DWINDOWS_STORE=OFF
+            -DWINDOWS_STORE=OFF `
+            -DCMAKE_SYSTEM_VERSION=10.0.26100.0
 
       - name: Build Dawn
         run: |
@@ -182,7 +189,7 @@ jobs:
           echo "CMake Configuration: Release" >> dawn-install/BUILD_INFO.txt
 
           PKG_NAME=dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64
-          tar -czf ${PKG_NAME}.tar.gz dawn-install/
+          zip -r ${PKG_NAME}.zip dawn-install/
 
       - name: Package build artifacts (Windows)
         if: runner.os == 'Windows'
@@ -197,7 +204,6 @@ jobs:
         with:
           name: dawn-build-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}
           path: |
-            dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.tar.gz
             dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.zip
 
       - name: Create Release
@@ -207,7 +213,6 @@ jobs:
           tag_name: ${{ env.BRANCH_NAME }}
           name: "Dawn Build - ${{ env.BRANCH_NAME }}"
           files: |
-            dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.tar.gz
             dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
