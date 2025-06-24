@@ -3,7 +3,7 @@ name: Check Dawn Branches and Build Latest
 on:
   schedule:
     # 每天 UTC 时间 02:00 运行（北京时间 10:00）
-    - cron: "0 2 * * *"
+    - cron: "0 14 * * 5"
   workflow_dispatch:
 
 env:
