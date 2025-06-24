@@ -152,9 +152,10 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           cd dawn-source
+          $installDir = Join-Path $PWD "dawn-install"
           cmake -B out/Release `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_INSTALL_PREFIX=../dawn-install `
+            -DCMAKE_INSTALL_PREFIX="$installDir" `
             -DDAWN_FETCH_DEPENDENCIES=ON `
             -DDAWN_ENABLE_INSTALL=ON `
             -DWINDOWS_STORE=OFF `
