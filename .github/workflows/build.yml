@@ -123,7 +123,7 @@ jobs:
       - name: Setup dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install python git nodejs -y
+          choco install ninja python git nodejs -y
 
       - name: Set environment variables
         shell: bash
@@ -152,7 +152,13 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           cd dawn-source
-          cmake -B out/Release -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../dawn-install -DDAWN_FETCH_DEPENDENCIES=ON -DDAWN_ENABLE_INSTALL=ON -DWINDOWS_STORE=OFF
+          cmake -B out/Release `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX=../dawn-install `
+            -DDAWN_FETCH_DEPENDENCIES=ON `
+            -DDAWN_ENABLE_INSTALL=ON `
+            -DWINDOWS_STORE=OFF `
+            -G Ninja
 
       - name: Build Dawn
         run: |
