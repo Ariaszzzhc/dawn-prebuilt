@@ -123,7 +123,7 @@ jobs:
       - name: Setup dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install ninja python git nodejs -y
+          choco install python git nodejs -y
 
       - name: Set environment variables
         shell: bash
@@ -158,8 +158,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$installDir" `
             -DDAWN_FETCH_DEPENDENCIES=ON `
             -DDAWN_ENABLE_INSTALL=ON `
-            -DWINDOWS_STORE=OFF `
-            -G Ninja
+            -DWINDOWS_STORE=OFF
 
       - name: Build Dawn
         run: |
