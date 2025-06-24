@@ -3,12 +3,12 @@ name: Check Dawn Branches and Build Latest
 on:
   schedule:
     # 每天 UTC 时间 02:00 运行（北京时间 10:00）
-    - cron: '0 2 * * *'
-  workflow_dispatch: # 允许手动触发
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 env:
-  DAWN_REPO: 'https://dawn.googlesource.com/dawn'
-  
+  DAWN_REPO: "https://dawn.googlesource.com/dawn"
+
 jobs:
   check-new-branches:
     runs-on: ubuntu-latest
@@ -16,236 +16,211 @@ jobs:
       latest-branch: ${{ steps.check.outputs.latest-branch }}
       latest-version: ${{ steps.check.outputs.latest-version }}
       has-new-branch: ${{ steps.check.outputs.has-new-branch }}
-    
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    
-    - name: Setup Git
-      run: |
-        git config --global user.name 'GitHub Actions'
-        git config --global user.email 'actions@github.com'
-    
-    - name: Check for new Dawn branches and find latest
-      id: check
-      run: |
-        # 获取 Dawn 仓库的所有分支
-        echo "Fetching Dawn repository branches..."
-        git ls-remote --heads $DAWN_REPO | grep 'refs/heads/chromium/' > current_branches.txt
-        
-        # 创建 previous_branches.txt 如果不存在
-        if [ ! -f previous_branches.txt ]; then
-          touch previous_branches.txt
-        fi
-        
-        # 比较找出新分支
-        new_branches=$(comm -13 <(sort previous_branches.txt) <(sort current_branches.txt))
-        
-        if [ -n "$new_branches" ]; then
-          echo "New branches found:"
-          echo "$new_branches"
-          
-          # 从新分支中提取版本号并找到最大的
-          max_version=0
-          latest_branch=""
-          
-          while IFS= read -r line; do
-            if [ -n "$line" ]; then
-              branch_name=$(echo "$line" | awk '{print $2}' | sed 's|refs/heads/||')
-              version=$(echo "$branch_name" | sed 's|chromium/||')
-              
-              echo "Found branch: $branch_name with version: $version"
-              
-              # 比较版本号（数字比较）
-              if [ "$version" -gt "$max_version" ]; then
-                max_version=$version
-                latest_branch=$branch_name
-              fi
-            fi
-          done <<< "$new_branches"
-          
-          if [ -n "$latest_branch" ]; then
-            echo "Latest branch to build: $latest_branch (version: $max_version)"
-            echo "has-new-branch=true" >> $GITHUB_OUTPUT
-            echo "latest-branch=$latest_branch" >> $GITHUB_OUTPUT
-            echo "latest-version=$max_version" >> $GITHUB_OUTPUT
-          else
-            echo "No valid branches found"
-            echo "has-new-branch=false" >> $GITHUB_OUTPUT
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+
+      - name: Check for new Dawn branches and find latest
+        id: check
+        run: |
+          # 获取 Dawn 仓库的所有分支
+          echo "Fetching Dawn repository branches..."
+          git ls-remote --heads $DAWN_REPO | grep 'refs/heads/chromium/' > current_branches.txt
+
+          # 创建 previous_branches.txt 如果不存在
+          if [ ! -f previous_branches.txt ]; then
+            touch previous_branches.txt
           fi
-          
-          # 更新记录文件
-          cp current_branches.txt previous_branches.txt
-          git add previous_branches.txt
-          git commit -m "Update tracked branches - Latest: $latest_branch" || true
-          git push || true
-        else
-          echo "No new branches found"
-          echo "has-new-branch=false" >> $GITHUB_OUTPUT
-          echo "latest-branch=" >> $GITHUB_OUTPUT
-          echo "latest-version=" >> $GITHUB_OUTPUT
-        fi
+
+          # 比较找出新分支
+          new_branches=$(comm -13 <(sort previous_branches.txt) <(sort current_branches.txt))
+
+          if [ -n "$new_branches" ]; then
+            echo "New branches found:"
+            echo "$new_branches"
+
+            # 从新分支中提取版本号并找到最大的
+            max_version=0
+            latest_branch=""
+
+            while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                branch_name=$(echo "$line" | awk '{print $2}' | sed 's|refs/heads/||')
+                version=$(echo "$branch_name" | sed 's|chromium/||')
+                echo "Found branch: $branch_name with version: $version"
+                if [ "$version" -gt "$max_version" ]; then
+                  max_version=$version
+                  latest_branch=$branch_name
+                fi
+              fi
+            done <<< "$new_branches"
+
+            if [ -n "$latest_branch" ]; then
+              echo "Latest branch to build: $latest_branch (version: $max_version)"
+              echo "has-new-branch=true" >> $GITHUB_OUTPUT
+              echo "latest-branch=$latest_branch" >> $GITHUB_OUTPUT
+              echo "latest-version=$max_version" >> $GITHUB_OUTPUT
+            else
+              echo "No valid branches found"
+              echo "has-new-branch=false" >> $GITHUB_OUTPUT
+            fi
+
+            cp current_branches.txt previous_branches.txt
+            git add previous_branches.txt
+            git commit -m "Update tracked branches - Latest: $latest_branch" || true
+            git push || true
+          else
+            echo "No new branches found"
+            echo "has-new-branch=false" >> $GITHUB_OUTPUT
+            echo "latest-branch=" >> $GITHUB_OUTPUT
+            echo "latest-version=" >> $GITHUB_OUTPUT
+          fi
 
   build-dawn:
     needs: check-new-branches
     if: needs.check-new-branches.outputs.has-new-branch == 'true'
-    runs-on: ubuntu-latest
-    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
     steps:
-    - name: Setup dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          cmake \
-          git \
-          python3 \
-          ninja-build \
-          python3-pip \
-          libx11-dev \
-          libxi-dev \
-          libxrandr-dev \
-          libxinerama-dev \
-          libxcursor-dev \
-          mesa-common-dev \
-          libx11-xcb-dev \
-          pkg-config \
-          nodejs \
-          npm
+      - name: Setup dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            git \
+            python3 \
+            ninja-build \
+            python3-pip \
+            libx11-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            mesa-common-dev \
+            libx11-xcb-dev \
+            pkg-config \
+            nodejs \
+            npm
 
-    - name: Set environment variables
-      run: |
-        echo "BRANCH_NAME=${{ needs.check-new-branches.outputs.latest-branch }}" >> $GITHUB_ENV
-        echo "VERSION=${{ needs.check-new-branches.outputs.latest-version }}" >> $GITHUB_ENV
-        # 创建安全的文件名（将斜杠替换为连字符）
-        echo "SAFE_BRANCH_NAME=$(echo "${{ needs.check-new-branches.outputs.latest-branch }}" | sed 's|/|-|g')" >> $GITHUB_ENV
+      - name: Setup dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja python pkg-config node
 
-    - name: Clone Dawn repository
-      run: |
-        echo "Building Dawn from branch: ${{ env.BRANCH_NAME }}"
-        git clone --depth 1 --branch ${{ env.BRANCH_NAME }} $DAWN_REPO dawn-source
+      - name: Setup dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install cmake ninja python git nodejs -y
 
-    - name: Configure Dawn build with CMake
-      run: |
-        cd dawn-source
-        
-        echo "Configuring Dawn build with automatic dependency fetching..."
-        cmake -B out/Release \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX=../dawn-install \
-          -DDAWN_FETCH_DEPENDENCIES=ON \
-          -DDAWN_ENABLE_INSTALL=ON \
-          -G Ninja
+      - name: Set environment variables
+        shell: bash
+        run: |
+          echo "BRANCH_NAME=${{ needs.check-new-branches.outputs.latest-branch }}" >> $GITHUB_ENV
+          echo "VERSION=${{ needs.check-new-branches.outputs.latest-version }}" >> $GITHUB_ENV
+          echo "SAFE_BRANCH_NAME=$(echo "${{ needs.check-new-branches.outputs.latest-branch }}" | sed 's|/|-|g')" >> $GITHUB_ENV
+          echo "PLATFORM_SUFFIX=$(echo "${{ runner.os }}" | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
 
-    - name: Build Dawn
-      run: |
-        cd dawn-source
-        echo "Building Dawn for Chromium version ${{ env.VERSION }}..."
-        echo "This may take a while as dependencies are being fetched automatically..."
-        cmake --build out/Release --parallel $(nproc)
+      - name: Clone Dawn repository
+        run: |
+          git clone --depth 1 --branch ${{ env.BRANCH_NAME }} ${{ env.DAWN_REPO }} dawn-source
 
-    - name: Install Dawn
-      run: |
-        cd dawn-source
-        echo "Installing Dawn to staging directory..."
-        cmake --install out/Release
+      - name: Configure Dawn build with CMake
+        if: runner.os != 'Windows'
+        run: |
+          cd dawn-source
+          cmake -B out/Release \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=../dawn-install \
+            -DDAWN_FETCH_DEPENDENCIES=ON \
+            -DDAWN_ENABLE_INSTALL=ON \
+            -G Ninja
 
-    - name: Package build artifacts
-      run: |
-        # 创建版本信息文件
-        echo "Branch: ${{ env.BRANCH_NAME }}" > dawn-install/BUILD_INFO.txt
-        echo "Chromium Version: ${{ env.VERSION }}" >> dawn-install/BUILD_INFO.txt
-        echo "Build Date: $(date -u)" >> dawn-install/BUILD_INFO.txt
-        echo "Build ID: ${{ github.run_id }}" >> dawn-install/BUILD_INFO.txt
-        echo "CMake Configuration: Release with shared libraries" >> dawn-install/BUILD_INFO.txt
-        
-        # 显示安装内容
-        echo "Installed Dawn contents:"
-        find dawn-install -type f | head -20
-        echo "..."
-        echo "Total files: $(find dawn-install -type f | wc -l)"
-        
-        # 使用安全的文件名创建压缩包
-        echo "Creating package with name: dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz"
-        tar -czf dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz dawn-install/
-        
-        # 计算文件哈希
-        sha256sum dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz > dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz.sha256
-        
-        # 显示包大小
-        ls -lh dawn-${{ env.SAFE_BRANCH_NAME }}-linux-x64.tar.gz
+      - name: Configure Dawn build with CMake (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd dawn-source
+          cmake -B out/Release \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=../dawn-install \
+            -DDAWN_FETCH_DEPENDENCIES=ON \
+            -DDAWN_ENABLE_INSTALL=ON \
+            -DWINDOWS_STORE=OFF \
+            -G Ninja
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ env.BRANCH_NAME }}
-        name: "Dawn Build - ${{ env.BRANCH_NAME }}"
-        body: |
-          🚀 **最新 Dawn 自动构建 (共享库版本)**
-          
-          这是从 Google Dawn 仓库自动构建的最新版本，包含完整的共享库和开发文件。
-          
-          **构建信息:**
-          - 分支: `${{ env.BRANCH_NAME }}`
-          - Chromium 版本: `${{ env.VERSION }}`
-          - 构建日期: $(date -u)
-          - 平台: Linux x64
-          - 库类型: **共享库 (Shared Libraries)**
-          
-          **构建特性:**
-          - ✅ `DAWN_FETCH_DEPENDENCIES=ON` - 自动获取所有依赖
-          - ✅ `DAWN_ENABLE_INSTALL=ON` - 完整安装布局
-          - ✅ `BUILD_SHARED_LIBS=ON` - 构建共享库
-          - ✅ Release 优化构建
-          
-          **包含内容:**
-          - Dawn WebGPU 实现库 (libdawn_*)
-          - Dawn 头文件和开发文件
-          - CMake 配置文件
-          - 完整的 pkg-config 文件
-          
-          **使用方法:**
-          ```bash
-          # 下载并验证
-          wget https://github.com/Ariaszzzhc/dawn-builder/releases/download/${{ env.BRANCH_NAME }}/dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
-          wget https://github.com/Ariaszzzhc/dawn-builder/releases/download/${{ env.BRANCH_NAME }}/dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
-          sha256sum -c dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
-          
-          # 解压并安装
-          tar -xzf dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
-          sudo cp -r dawn-install/* /usr/local/
-          
-          # 或者设置环境变量使用
-          export DAWN_ROOT=$(pwd)/dawn-install
-          export PKG_CONFIG_PATH=$DAWN_ROOT/lib/pkgconfig:$PKG_CONFIG_PATH
-          export LD_LIBRARY_PATH=$DAWN_ROOT/lib:$LD_LIBRARY_PATH
-          ```
-          
-          **CMake 集成:**
-          ```cmake
-          find_package(dawn REQUIRED)
-          target_link_libraries(your_target dawn::dawn)
-          ```
-        files: |
-          dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
-          dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build Dawn
+        run: |
+          cd dawn-source
+          cmake --build out/Release --parallel
+
+      - name: Install Dawn
+        run: |
+          cd dawn-source
+          cmake --install out/Release
+
+      - name: Package build artifacts (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          echo "Branch: ${{ env.BRANCH_NAME }}" > dawn-install/BUILD_INFO.txt
+          echo "Chromium Version: ${{ env.VERSION }}" >> dawn-install/BUILD_INFO.txt
+          echo "Build Date: $(date -u)" >> dawn-install/BUILD_INFO.txt
+          echo "Build ID: ${{ github.run_id }}" >> dawn-install/BUILD_INFO.txt
+          echo "Platform: ${{ runner.os }}" >> dawn-install/BUILD_INFO.txt
+          echo "CMake Configuration: Release" >> dawn-install/BUILD_INFO.txt
+
+          PKG_NAME=dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64
+          tar -czf ${PKG_NAME}.tar.gz dawn-install/
+
+      - name: Package build artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PKG_NAME = "dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64"
+          Set-Content -Path dawn-install\BUILD_INFO.txt -Value "Branch: $env:BRANCH_NAME`nChromium Version: $env:VERSION`nBuild Date: $(Get-Date -Format u)`nBuild ID: $env:GITHUB_RUN_ID`nPlatform: Windows`nCMake Configuration: Release"
+          Compress-Archive -Path dawn-install\* -DestinationPath "$env:PKG_NAME.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dawn-build-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}
+          path: |
+            dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.tar.gz
+            dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.zip
+
+      - name: Create Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.BRANCH_NAME }}
+          name: "Dawn Build - ${{ env.BRANCH_NAME }}"
+          files: |
+            dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.tar.gz
+            dawn-${{ env.SAFE_BRANCH_NAME }}-${{ env.PLATFORM_SUFFIX }}-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   cleanup:
     needs: [check-new-branches, build-dawn]
     if: always()
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Cleanup old releases (keep latest 10)
-      uses: dev-drprasad/delete-older-releases@v0.3.2
-      with:
-        keep_latest: 10
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup old releases (keep latest 10)
+        uses: dev-drprasad/delete-older-releases@v0.3.2
+        with:
+          keep_latest: 10
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
