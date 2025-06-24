@@ -110,7 +110,9 @@ jobs:
           libxinerama-dev \
           libxcursor-dev \
           libxi-dev \
-          libgl1-mesa-dev
+          libgl1-mesa-dev \
+          libxkbcommon-dev \
+          libwayland-dev
 
     - name: Set environment variables
       run: |
@@ -122,60 +124,54 @@ jobs:
         echo "Building Dawn from branch: ${{ env.BRANCH_NAME }}"
         git clone --depth 1 --branch ${{ env.BRANCH_NAME }} $DAWN_REPO dawn-source
 
-    - name: Setup build environment
+    - name: Configure Dawn build with CMake
       run: |
         cd dawn-source
         
-        # 初始化 gclient（如果需要）
-        if [ -f .gclient ]; then
-          gclient sync
-        fi
-        
-        # 创建构建目录
-        mkdir -p out/Release
-
-    - name: Configure build
-      run: |
-        cd dawn-source
-        
-        # 使用 CMake 配置构建
+        echo "Configuring Dawn build with automatic dependency fetching..."
         cmake -B out/Release \
           -DCMAKE_BUILD_TYPE=Release \
-          -DDAWN_BUILD_SAMPLES=OFF \
-          -DDAWN_BUILD_TESTS=OFF \
-          -DTINT_BUILD_TESTS=OFF \
+          -DCMAKE_INSTALL_PREFIX=../dawn-install \
+          -DDAWN_FETCH_DEPENDENCIES=ON \
+          -DDAWN_ENABLE_INSTALL=ON \
           -G Ninja
 
     - name: Build Dawn
       run: |
         cd dawn-source
         echo "Building Dawn for Chromium version ${{ env.VERSION }}..."
+        echo "This may take a while as dependencies are being fetched automatically..."
         cmake --build out/Release --parallel $(nproc)
+
+    - name: Install Dawn
+      run: |
+        cd dawn-source
+        echo "Installing Dawn to staging directory..."
+        cmake --install out/Release
 
     - name: Package build artifacts
       run: |
-        cd dawn-source
-        
-        # 创建发布包目录
-        mkdir -p ../dawn-release
-        
-        # 复制构建产物
-        cp -r out/Release/lib* ../dawn-release/ 2>/dev/null || true
-        cp -r out/Release/bin* ../dawn-release/ 2>/dev/null || true
-        cp -r include ../dawn-release/ 2>/dev/null || true
-        
         # 创建版本信息文件
-        echo "Branch: ${{ env.BRANCH_NAME }}" > ../dawn-release/BUILD_INFO.txt
-        echo "Chromium Version: ${{ env.VERSION }}" >> ../dawn-release/BUILD_INFO.txt
-        echo "Build Date: $(date -u)" >> ../dawn-release/BUILD_INFO.txt
-        echo "Build ID: ${{ github.run_id }}" >> ../dawn-release/BUILD_INFO.txt
+        echo "Branch: ${{ env.BRANCH_NAME }}" > dawn-install/BUILD_INFO.txt
+        echo "Chromium Version: ${{ env.VERSION }}" >> dawn-install/BUILD_INFO.txt
+        echo "Build Date: $(date -u)" >> dawn-install/BUILD_INFO.txt
+        echo "Build ID: ${{ github.run_id }}" >> dawn-install/BUILD_INFO.txt
+        echo "CMake Configuration: Release with shared libraries" >> dawn-install/BUILD_INFO.txt
+        
+        # 显示安装内容
+        echo "Installed Dawn contents:"
+        find dawn-install -type f | head -20
+        echo "..."
+        echo "Total files: $(find dawn-install -type f | wc -l)"
         
         # 创建压缩包
-        cd ..
-        tar -czf dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz dawn-release/
+        tar -czf dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz dawn-install/
         
         # 计算文件哈希
         sha256sum dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz > dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
+        
+        # 显示包大小
+        ls -lh dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
@@ -183,34 +179,50 @@ jobs:
         tag_name: ${{ env.BRANCH_NAME }}
         name: "Dawn Build - ${{ env.BRANCH_NAME }}"
         body: |
-          🚀 **最新 Dawn 自动构建**
+          🚀 **最新 Dawn 自动构建 (共享库版本)**
           
-          这是从 Google Dawn 仓库自动构建的最新版本。
+          这是从 Google Dawn 仓库自动构建的最新版本，包含完整的共享库和开发文件。
           
           **构建信息:**
           - 分支: `${{ env.BRANCH_NAME }}`
           - Chromium 版本: `${{ env.VERSION }}`
-          - 构建日期: ${{ github.run_number }}
+          - 构建日期: $(date -u)
           - 平台: Linux x64
+          - 库类型: **共享库 (Shared Libraries)**
           
-          **说明:**
-          - 每天自动检查新分支，只构建**最新版本号**的分支
-          - 避免重复构建，确保你获得的始终是最新的 Dawn 版本
+          **构建特性:**
+          - ✅ `DAWN_FETCH_DEPENDENCIES=ON` - 自动获取所有依赖
+          - ✅ `DAWN_ENABLE_INSTALL=ON` - 完整安装布局
+          - ✅ `BUILD_SHARED_LIBS=ON` - 构建共享库
+          - ✅ Release 优化构建
           
-          **文件说明:**
-          - `dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz` - Dawn 库文件和二进制文件
-          - `dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256` - SHA256 校验和
-          - `BUILD_INFO.txt` - 详细构建信息（包含在压缩包内）
+          **包含内容:**
+          - Dawn WebGPU 实现库 (libdawn_*)
+          - Dawn 头文件和开发文件
+          - CMake 配置文件
+          - 完整的 pkg-config 文件
           
           **使用方法:**
           ```bash
           # 下载并验证
-          wget https://github.com/${{ github.repository }}/releases/download/${{ env.BRANCH_NAME }}/dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
-          wget https://github.com/${{ github.repository }}/releases/download/${{ env.BRANCH_NAME }}/dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
+          wget https://github.com/Ariaszzzhc/dawn-builder/releases/download/${{ env.BRANCH_NAME }}/dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
+          wget https://github.com/Ariaszzzhc/dawn-builder/releases/download/${{ env.BRANCH_NAME }}/dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
           sha256sum -c dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz.sha256
           
-          # 解压使用
+          # 解压并安装
           tar -xzf dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
+          sudo cp -r dawn-install/* /usr/local/
+          
+          # 或者设置环境变量使用
+          export DAWN_ROOT=$(pwd)/dawn-install
+          export PKG_CONFIG_PATH=$DAWN_ROOT/lib/pkgconfig:$PKG_CONFIG_PATH
+          export LD_LIBRARY_PATH=$DAWN_ROOT/lib:$LD_LIBRARY_PATH
+          ```
+          
+          **CMake 集成:**
+          ```cmake
+          find_package(dawn REQUIRED)
+          target_link_libraries(your_target dawn::dawn)
           ```
         files: |
           dawn-${{ env.BRANCH_NAME }}-linux-x64.tar.gz
@@ -233,4 +245,3 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
