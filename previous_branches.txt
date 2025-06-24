@@ -1,0 +1,2 @@
+# This file will be automatically updated by GitHub Actions
+# It tracks the branches that have already been processed
