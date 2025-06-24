@@ -102,17 +102,16 @@ jobs:
           cmake \
           git \
           python3 \
-          python3-pip \
           ninja-build \
-          pkg-config \
-          libx11-dev \
+          python3-pip \
           libxrandr-dev \
           libxinerama-dev \
           libxcursor-dev \
-          libxi-dev \
-          libgl1-mesa-dev \
-          libxkbcommon-dev \
-          libwayland-dev
+          mesa-common-dev \
+          libx11-xcb-dev \
+          pkg-config \
+          nodejs \
+          npm
 
     - name: Set environment variables
       run: |
