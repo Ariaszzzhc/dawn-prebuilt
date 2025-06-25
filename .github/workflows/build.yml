@@ -156,6 +156,9 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=../dawn-install \
             -DDAWN_FETCH_DEPENDENCIES=ON \
             -DDAWN_ENABLE_INSTALL=ON \
+            -DDAWN_BUILD_SAMPLES=OFF \
+            -DDAWN_BUILD_TESTS=OFF \
+            -DDAWN_BUILD_BENCHMARKS=OFF \
             -G Ninja
 
       - name: Configure Dawn build with CMake (Windows)
@@ -169,9 +172,12 @@ jobs:
             -DDAWN_FETCH_DEPENDENCIES=ON `
             -DDAWN_ENABLE_INSTALL=ON `
             -DWINDOWS_STORE=OFF `
-            -DCMAKE_SYSTEM_VERSION=10.0.26100.0 `
+            -DCMAKE_SYSTEM_VERSION="10.0.26100.0" `
             -DCMAKE_C_COMPILER=cl `
             -DCMAKE_CXX_COMPILER=cl `
+            -DDAWN_BUILD_SAMPLES=OFF `
+            -DDAWN_BUILD_TESTS=OFF `
+            -DDAWN_BUILD_BENCHMARKS=OFF `
             -GNinja
 
       - name: Build Dawn
