@@ -126,6 +126,10 @@ jobs:
         with:
           sdk-version: 26100
 
+      - name: Setup MSVC Developer Command Prompt (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Setup dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -166,8 +170,8 @@ jobs:
             -DDAWN_ENABLE_INSTALL=ON `
             -DWINDOWS_STORE=OFF `
             -DCMAKE_SYSTEM_VERSION=10.0.26100.0 `
-            -DCMAKE_C_COMPILER=clang-cl `
-            -DCMAKE_CXX_COMPILER=clang-cl `
+            -DCMAKE_C_COMPILER=cl `
+            -DCMAKE_CXX_COMPILER=cl `
             -GNinja
 
       - name: Build Dawn
