@@ -129,7 +129,7 @@ jobs:
       - name: Setup dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install python git nodejs -y
+          choco install ninja python git nodejs -y
 
       - name: Set environment variables
         shell: bash
