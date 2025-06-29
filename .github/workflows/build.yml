@@ -95,6 +95,9 @@ jobs:
       - name: Setup dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 19
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
@@ -112,7 +115,9 @@ jobs:
             libx11-xcb-dev \
             pkg-config \
             nodejs \
-            npm
+            npm \
+            clang-19 \
+            lld-19
 
       - name: Setup dependencies (macOS)
         if: runner.os == 'macOS'
@@ -148,7 +153,24 @@ jobs:
           git clone --depth 1 --branch ${{ env.BRANCH_NAME }} ${{ env.DAWN_REPO }} dawn-source
 
       - name: Configure Dawn build with CMake
-        if: runner.os != 'Windows'
+        if: runner.os == 'Linux'
+        run: |
+          cd dawn-source
+          cmake -B out/Release \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=../dawn-install \
+            -DDAWN_FETCH_DEPENDENCIES=ON \
+            -DDAWN_ENABLE_INSTALL=ON \
+            -DDAWN_BUILD_SAMPLES=OFF \
+            -DDAWN_BUILD_TESTS=OFF \
+            -DCMAKE_C_COMPILER=clang-19 \
+            -DCMAKE_CXX_COMPILER=clang++-19 \
+            -DCMAKE_LINKER=lld-19 \
+            -DDAWN_BUILD_BENCHMARKS=OFF \
+            -G Ninja
+
+      - name: Configure Dawn build with CMake
+        if: runner.os == 'macOS'
         run: |
           cd dawn-source
           cmake -B out/Release \
