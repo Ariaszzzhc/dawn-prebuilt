@@ -11,7 +11,11 @@ on:
     - cron: "0 6 * * 1" # Every Monday 6am UTC
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: dawn-build-${{ github.workflow }}-${{ github.event.inputs.dawn_ref || 'main' }}
+  cancel-in-progress: false
 
 env:
   CMAKE_FLAGS: >-
@@ -145,13 +149,19 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Determine Dawn commit
         id: dawn
         run: |
           REF="${{ inputs.dawn_ref || 'main' }}"
           COMMIT=$(git ls-remote https://dawn.googlesource.com/dawn "$REF" | head -1 | cut -c1-12)
-          echo "commit=${COMMIT:-unknown}" >> "$GITHUB_OUTPUT"
+          if [ -z "$COMMIT" ]; then
+            echo "Failed to resolve Dawn ref: $REF" >&2
+            exit 1
+          fi
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
