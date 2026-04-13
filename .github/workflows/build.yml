@@ -74,6 +74,15 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Print Windows SDK version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Windows SDK dir:"
+          Get-ChildItem "$env:WindowsSdkDir\bin" | Select-Object Name
+          Write-Host "UCRT dir:"
+          Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\d3dcompiler_47.dll" -ErrorAction SilentlyContinue | Select-Object FullName
+
       - name: Configure
         run: |
           cmake -S dawn -B build -GNinja -DCMAKE_BUILD_TYPE=Release ${{ env.CMAKE_FLAGS }}
@@ -86,6 +95,34 @@ jobs:
       - name: Install
         run: cmake --install build --prefix install
         shell: bash
+
+      - name: Copy Windows runtime DLLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binDir = "install/bin"
+          if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force }
+
+          # Find d3dcompiler_47.dll from Windows SDK
+          $dll = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\d3dcompiler_47.dll" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if ($dll) {
+            Copy-Item $dll.FullName -Destination $binDir
+            Write-Host "Copied: $($dll.FullName)"
+          } else {
+            Write-Error "d3dcompiler_47.dll not found in Windows SDK"
+            exit 1
+          }
+
+          # Copy Dawn shared library (may be in bin/ already or lib/)
+          $dawnDll = Get-ChildItem -Path "install" -Recurse -Filter "dawn.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dawnDll) {
+            $dawnDll = Get-ChildItem -Path "install" -Recurse -Filter "webgpu_dawn.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if ($dawnDll -and ($dawnDll.DirectoryName -ne (Resolve-Path $binDir).Path)) {
+            Copy-Item $dawnDll.FullName -Destination $binDir
+            Write-Host "Copied: $($dawn.FullName)"
+          }
 
       - name: Package
         shell: bash
@@ -112,7 +149,6 @@ jobs:
       - name: Determine Dawn commit
         id: dawn
         run: |
-          # Fetch the ref to resolve commit
           REF="${{ inputs.dawn_ref || 'main' }}"
           COMMIT=$(git ls-remote https://dawn.googlesource.com/dawn "$REF" | head -1 | cut -c1-12)
           echo "commit=${COMMIT:-unknown}" >> "$GITHUB_OUTPUT"
@@ -148,4 +184,6 @@ jobs:
             - GPU backends: platform defaults (D3D11/D3D12/Vulkan on Windows, Metal on macOS, OpenGL/Vulkan on Linux)
             - Tint command-line tools included
             - Samples, tests, benchmarks, fuzzers excluded
+
+            **Windows note:** `d3dcompiler_47.dll` is included in `bin/`.
           files: release/*
