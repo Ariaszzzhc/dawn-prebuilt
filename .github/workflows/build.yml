@@ -125,7 +125,7 @@ jobs:
           }
           if ($dawnDll -and ($dawnDll.DirectoryName -ne (Resolve-Path $binDir).Path)) {
             Copy-Item $dawnDll.FullName -Destination $binDir
-            Write-Host "Copied: $($dawn.FullName)"
+            Write-Host "Copied: $($dawnDll.FullName)"
           }
 
       - name: Package
