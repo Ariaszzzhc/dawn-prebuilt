@@ -1,0 +1,151 @@
+name: Build Dawn
+
+on:
+  workflow_dispatch:
+    inputs:
+      dawn_ref:
+        description: "Dawn git ref (branch, tag, or commit)"
+        required: false
+        default: "main"
+  schedule:
+    - cron: "0 6 * * 1" # Every Monday 6am UTC
+
+permissions:
+  contents: write
+
+env:
+  CMAKE_FLAGS: >-
+    -DDAWN_ENABLE_NULL=OFF
+    -DDAWN_ENABLE_SPIRV_VALIDATION=ON
+    -DDAWN_BUILD_SAMPLES=OFF
+    -DDAWN_BUILD_TESTS=OFF
+    -DDAWN_BUILD_BENCHMARKS=OFF
+    -DDAWN_BUILD_NODE_BINDINGS=OFF
+    -DDAWN_ENABLE_SWIFTSHADER=OFF
+    -DDAWN_ENABLE_INSTALL=ON
+    -DDAWN_BUILD_MONOLITHIC_LIBRARY=SHARED
+    -DDAWN_BUILD_PROTOBUF=OFF
+    -DTINT_BUILD_TESTS=OFF
+    -DTINT_BUILD_CMD_TOOLS=ON
+    -DDAWN_FETCH_DEPENDENCIES=ON
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: x86_64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86_64
+          - os: macos-13
+            platform: macos
+            arch: x86_64
+          - os: macos-latest
+            platform: macos
+            arch: aarch64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Dawn
+        uses: actions/checkout@v4
+        with:
+          repository: google/dawn
+          ref: ${{ inputs.dawn_ref || 'main' }}
+          path: dawn
+          fetch-depth: 1
+
+      - name: Determine Dawn commit
+        id: dawn
+        working-directory: dawn
+        run: echo "commit=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev mesa-common-dev libx11-xcb-dev pkg-config
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: |
+          cmake -S dawn -B build -GNinja -DCMAKE_BUILD_TYPE=Release ${{ env.CMAKE_FLAGS }}
+        shell: bash
+
+      - name: Build
+        run: cmake --build build
+        shell: bash
+
+      - name: Install
+        run: cmake --install build --prefix install
+        shell: bash
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir artifact
+          cd install
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a -tzip ../artifact/dawn-${{ matrix.platform }}-${{ matrix.arch }}.zip .
+          else
+            tar czf ../artifact/dawn-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz .
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dawn-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifact/*
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine Dawn commit
+        id: dawn
+        run: |
+          # Fetch the ref to resolve commit
+          REF="${{ inputs.dawn_ref || 'main' }}"
+          COMMIT=$(git ls-remote https://dawn.googlesource.com/dawn "$REF" | head -1 | cut -c1-12)
+          echo "commit=${COMMIT:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Collect packages
+        run: |
+          mkdir release
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" \) -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dawn-${{ steps.dawn.outputs.commit }}
+          name: Dawn ${{ steps.dawn.outputs.commit }}
+          body: |
+            Pre-built Dawn binaries from commit `${{ steps.dawn.outputs.commit }}`.
+
+            **Platforms:**
+            - `macos-aarch64` (Apple Silicon)
+            - `macos-x86_64` (Intel Mac)
+            - `linux-x86_64`
+            - `windows-x86_64`
+
+            **Build options:**
+            - Monolithic shared library
+            - GPU backends: platform defaults (D3D11/D3D12/Vulkan on Windows, Metal on macOS, OpenGL/Vulkan on Linux)
+            - Tint command-line tools included
+            - Samples, tests, benchmarks, fuzzers excluded
+          files: release/*
