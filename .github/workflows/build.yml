@@ -87,12 +87,6 @@ jobs:
         run: |
           git clone --depth=1 -b "${{ needs.resolve.outputs.dawn_ref }}" https://dawn.googlesource.com/dawn dawn
 
-      - name: Determine Dawn commit
-        id: dawn
-        working-directory: dawn
-        run: echo "commit=${{ needs.resolve.outputs.dawn_commit }}" >> "$GITHUB_OUTPUT"
-        shell: bash
-
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
