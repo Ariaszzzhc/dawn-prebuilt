@@ -84,12 +84,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Dawn
-        uses: actions/checkout@v4
-        with:
-          repository: google/dawn
-          ref: ${{ needs.resolve.outputs.dawn_ref }}
-          path: dawn
-          fetch-depth: 1
+        run: |
+          git clone --depth=1 -b "${{ needs.resolve.outputs.dawn_ref }}" https://dawn.googlesource.com/dawn dawn
 
       - name: Determine Dawn commit
         id: dawn
