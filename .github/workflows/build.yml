@@ -3,18 +3,16 @@ name: Build Dawn
 on:
   workflow_dispatch:
     inputs:
-      dawn_ref:
-        description: "Dawn git ref (branch, tag, or commit)"
-        required: false
-        default: "main"
-  schedule:
-    - cron: "0 6 * * 1" # Every Monday 6am UTC
+      chrome_build:
+        description: "Chrome build number (e.g. 7778 for chromium/7778)"
+        required: true
+        default: "7778"
 
 permissions:
   contents: read
 
 concurrency:
-  group: dawn-build-${{ github.workflow }}-${{ github.event.inputs.dawn_ref || 'main' }}
+  group: dawn-build-${{ github.workflow }}-${{ inputs.chrome_build }}
   cancel-in-progress: false
 
 env:
@@ -34,7 +32,37 @@ env:
     -DDAWN_FETCH_DEPENDENCIES=ON
 
 jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      dawn_ref: ${{ steps.resolve.outputs.ref }}
+      dawn_commit: ${{ steps.resolve.outputs.commit }}
+    steps:
+      - name: Resolve Dawn ref from Chrome build number
+        id: resolve
+        run: |
+          BUILD="${{ inputs.chrome_build }}"
+          echo "Resolving Dawn ref for Chrome build ${BUILD}..."
+
+          # List all chromium/<build> and chromium/<build>_* refs, pick the one with the highest suffix
+          REFS=$(git ls-remote https://dawn.googlesource.com/dawn "refs/heads/chromium/${BUILD}*" 2>/dev/null)
+
+          if [ -z "$REFS" ]; then
+            echo "ERROR: No Dawn branch found for chromium/${BUILD}" >&2
+            exit 1
+          fi
+
+          # Find the ref with the highest patch suffix (e.g. 7778_5 > 7778_2 > 7778)
+          BEST_REF=$(echo "$REFS" | awk '{print $2}' | sed 's|refs/heads/||' | sort -t_ -k2 -n | tail -1)
+          BEST_COMMIT=$(echo "$REFS" | grep "refs/heads/${BEST_REF}$" | awk '{print $1}')
+
+          echo "  ref:     ${BEST_REF}"
+          echo "  commit:  ${BEST_COMMIT:0:12}"
+          echo "ref=${BEST_REF}" >> "$GITHUB_OUTPUT"
+          echo "commit=${BEST_COMMIT:0:12}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: resolve
     strategy:
       fail-fast: false
       matrix:
@@ -59,14 +87,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: google/dawn
-          ref: ${{ inputs.dawn_ref || 'main' }}
+          ref: ${{ needs.resolve.outputs.dawn_ref }}
           path: dawn
           fetch-depth: 1
 
       - name: Determine Dawn commit
         id: dawn
         working-directory: dawn
-        run: echo "commit=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+        run: echo "commit=${{ needs.resolve.outputs.dawn_commit }}" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Install Linux dependencies
@@ -148,7 +176,7 @@ jobs:
           retention-days: 1
 
   release:
-    needs: build
+    needs: [resolve, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -156,13 +184,7 @@ jobs:
       - name: Determine Dawn commit
         id: dawn
         run: |
-          REF="${{ inputs.dawn_ref || 'main' }}"
-          COMMIT=$(git ls-remote https://dawn.googlesource.com/dawn "$REF" | head -1 | cut -c1-12)
-          if [ -z "$COMMIT" ]; then
-            echo "Failed to resolve Dawn ref: $REF" >&2
-            exit 1
-          fi
-          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "commit=${{ needs.resolve.outputs.dawn_commit }}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -179,10 +201,10 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: dawn-${{ steps.dawn.outputs.commit }}
-          name: Dawn ${{ steps.dawn.outputs.commit }}
+          tag_name: dawn-chrome-${{ inputs.chrome_build }}
+          name: Dawn for Chrome ${{ inputs.chrome_build }}
           body: |
-            Pre-built Dawn binaries from commit `${{ steps.dawn.outputs.commit }}`.
+            Pre-built Dawn binaries matching Chrome build `${{ inputs.chrome_build }}` (Dawn commit `${{ steps.dawn.outputs.commit }}`).
 
             **Platforms:**
             - `macos-aarch64` (Apple Silicon)
