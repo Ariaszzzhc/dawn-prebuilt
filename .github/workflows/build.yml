@@ -45,6 +45,7 @@ jobs:
           - os: ubuntu-latest
             platform: linux
             arch: x86_64
+            cmake_extra: -DTINT_BUILD_NULL_WRITER=ON
           - os: macos-15-intel
             platform: macos
             arch: x86_64
@@ -89,7 +90,7 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S dawn -B build -GNinja -DCMAKE_BUILD_TYPE=Release ${{ env.CMAKE_FLAGS }}
+          cmake -S dawn -B build -GNinja -DCMAKE_BUILD_TYPE=Release ${{ env.CMAKE_FLAGS }} ${{ matrix.cmake_extra }}
         shell: bash
 
       - name: Build
