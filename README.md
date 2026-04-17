@@ -59,11 +59,21 @@ package also attaches the matching include path, library path, runtime path, and
 
 The current package manifest points at release `dawn-chrome-7778`.
 
+This package follows the Chrome Beta channel. Chrome versions have the form
+`major.minor.build.patch`; the Dawn branch build number is the `build` segment.
+For example, Chrome `147.0.7727.101` maps to Dawn branch `chromium/7727`.
+The workflow uses the Linux Chrome Beta version as the canonical desktop Chrome
+Beta source.
+
 When bumping Dawn:
 
-1. Run the GitHub Actions workflow with the desired Chrome build number.
-2. Wait for the platform archives to be published in GitHub Releases.
-3. Update the release URLs and hashes in `build.zig.zon`.
+1. The weekly GitHub Actions workflow reads the latest Chrome Beta version.
+2. It extracts the Chrome build number and resolves the matching Dawn
+   `chromium/<build>` branch.
+3. If `build.zig.zon` already points at that Chrome build, the workflow exits
+   without rebuilding.
+4. Otherwise, it builds and publishes the platform archives, computes their Zig
+   package hashes, updates `build.zig.zon`, and commits the manifest bump.
 
 The release archives contain the installed Dawn files only. This repository
 remains the Zig-facing wrapper.
@@ -81,7 +91,13 @@ remains the Zig-facing wrapper.
 
 ## Build Dawn Archives
 
-Run the `Build Dawn` GitHub Actions workflow manually with a Chrome build number.
-The workflow resolves the matching Dawn `chromium/<build>` branch, builds each
-supported platform, and publishes the Dawn archives to the corresponding GitHub
-Release.
+The `Build Dawn` workflow runs weekly and can also be run manually.
+
+- Leave `chrome_build` empty to use the latest Chrome Beta build number.
+- Set `chrome_build` to build a specific Dawn `chromium/<build>` branch.
+- Set `force_rebuild` to rebuild even if `build.zig.zon` already points at the
+  selected Chrome build.
+
+When the selected build is new, the workflow builds each supported platform,
+publishes the Dawn archives to the corresponding GitHub Release, and updates the
+Zig package manifest.

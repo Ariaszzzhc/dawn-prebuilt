@@ -4,18 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       chrome_build:
-        description: "Chrome build number (e.g. 7778 for chromium/7778)"
-        required: true
-        default: "7778"
+        description: "Chrome build number override (e.g. 7778 for chromium/7778). Leave empty to use Chrome Beta."
+        required: false
+        default: ""
+      force_rebuild:
+        description: "Rebuild even if build.zig.zon already points at this Chrome build."
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "23 3 * * 1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: dawn-build-${{ github.workflow }}-${{ inputs.chrome_build }}
+  group: dawn-build-${{ github.workflow }}
   cancel-in-progress: false
 
 env:
+  CHROME_BETA_VERSIONS_URL: https://versionhistory.googleapis.com/v1/chrome/platforms/linux/channels/beta/versions?order_by=version%20desc
+  PACKAGE_REPOSITORY: Ariaszzzhc/webgpu-dawn.zig
   CMAKE_FLAGS: >-
     -DDAWN_ENABLE_NULL=OFF
     -DDAWN_ENABLE_SPIRV_VALIDATION=ON
@@ -35,34 +44,155 @@ jobs:
   resolve:
     runs-on: ubuntu-latest
     outputs:
-      dawn_ref: ${{ steps.resolve.outputs.ref }}
-      dawn_commit: ${{ steps.resolve.outputs.commit }}
+      should_build: ${{ steps.resolve.outputs.should_build }}
+      chrome_build: ${{ steps.resolve.outputs.chrome_build }}
+      chrome_version: ${{ steps.resolve.outputs.chrome_version }}
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      dawn_ref: ${{ steps.resolve.outputs.dawn_ref }}
+      dawn_commit: ${{ steps.resolve.outputs.dawn_commit }}
+      dawn_commit_short: ${{ steps.resolve.outputs.dawn_commit_short }}
     steps:
-      - name: Resolve Dawn ref from Chrome build number
+      - name: Checkout package
+        uses: actions/checkout@v4
+
+      - name: Resolve Chrome Beta build and Dawn ref
         id: resolve
+        shell: bash
+        env:
+          INPUT_CHROME_BUILD: ${{ inputs.chrome_build }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
         run: |
-          BUILD="${{ inputs.chrome_build }}"
-          echo "Resolving Dawn ref for Chrome build ${BUILD}..."
+          set -euo pipefail
 
-          # List all chromium/<build> and chromium/<build>_* refs, pick the one with the highest suffix
-          REFS=$(git ls-remote https://dawn.googlesource.com/dawn "refs/heads/chromium/${BUILD}*" 2>/dev/null)
-
-          if [ -z "$REFS" ]; then
-            echo "ERROR: No Dawn branch found for chromium/${BUILD}" >&2
-            exit 1
+          FORCE=false
+          if [ "${FORCE_REBUILD:-false}" = "true" ]; then
+            FORCE=true
           fi
 
-          # Find the ref with the highest patch suffix (e.g. 7778_5 > 7778_2 > 7778)
-          BEST_REF=$(echo "$REFS" | awk '{print $2}' | sed 's|refs/heads/||' | sort -t_ -k2 -n | tail -1)
-          BEST_COMMIT=$(echo "$REFS" | grep "refs/heads/${BEST_REF}$" | awk '{print $1}')
+          if [ -n "${INPUT_CHROME_BUILD:-}" ]; then
+            BUILD="${INPUT_CHROME_BUILD}"
+            CHROME_VERSION="manual"
+            echo "Using manually supplied Chrome build number: ${BUILD}"
+          else
+            echo "Resolving latest Chrome Beta version from ${CHROME_BETA_VERSIONS_URL}"
+            RESOLVED_VERSION_AND_BUILD="$(
+              python3 <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          url = os.environ["CHROME_BETA_VERSIONS_URL"]
+          with urllib.request.urlopen(url, timeout=30) as response:
+              data = json.load(response)
+
+          def version_key(version):
+              parts = version.split(".")
+              if len(parts) != 4:
+                  raise ValueError(f"unexpected Chrome version: {version}")
+              return tuple(int(part) for part in parts)
+
+          versions = sorted(
+              {item["version"] for item in data.get("versions", []) if "version" in item},
+              key=version_key,
+              reverse=True,
+          )
+          if not versions:
+              print("Chrome Beta version API returned no versions", file=sys.stderr)
+              sys.exit(1)
+
+          version = versions[0]
+          parts = version.split(".")
+          print(f"{version} {parts[2]}")
+          PY
+            )"
+            CHROME_VERSION="${RESOLVED_VERSION_AND_BUILD% *}"
+            BUILD="${RESOLVED_VERSION_AND_BUILD##* }"
+            echo "Latest Chrome Beta version: ${CHROME_VERSION}"
+            echo "Chrome build number: ${BUILD}"
+          fi
+
+          case "${BUILD}" in
+            ""|*[!0-9]*)
+              echo "ERROR: Chrome build number must contain digits only: ${BUILD}" >&2
+              exit 1
+              ;;
+          esac
+
+          TAG_NAME="dawn-chrome-${BUILD}"
+          {
+            echo "chrome_build=${BUILD}"
+            echo "chrome_version=${CHROME_VERSION}"
+            echo "tag_name=${TAG_NAME}"
+          } >> "$GITHUB_OUTPUT"
+
+          MATCH_COUNT="$( (grep -o "releases/download/${TAG_NAME}/" build.zig.zon || true) | wc -l | tr -d ' ')"
+          if [ "${FORCE}" != "true" ] && [ "${MATCH_COUNT}" -ge 4 ]; then
+            echo "build.zig.zon already points at ${TAG_NAME}; skipping build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Resolving Dawn ref for Chrome build ${BUILD}..."
+          REFS="$(git ls-remote https://dawn.googlesource.com/dawn "refs/heads/chromium/${BUILD}" "refs/heads/chromium/${BUILD}_*" 2>/dev/null || true)"
+
+          if [ -z "${REFS}" ]; then
+            echo "No Dawn branch found for chromium/${BUILD}."
+            if [ -n "${INPUT_CHROME_BUILD:-}" ] || [ "${FORCE}" = "true" ]; then
+              exit 1
+            fi
+            echo "Skipping scheduled build until Dawn publishes chromium/${BUILD}."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BEST_REF_AND_COMMIT="$(
+            REFS="${REFS}" BUILD="${BUILD}" python3 <<'PY'
+          import os
+          import re
+          import sys
+
+          build = os.environ["BUILD"]
+          refs = os.environ["REFS"].splitlines()
+          candidates = []
+
+          for line in refs:
+              try:
+                  commit, ref = line.split(None, 1)
+              except ValueError:
+                  continue
+              ref = ref.removeprefix("refs/heads/")
+              if ref == f"chromium/{build}":
+                  candidates.append((-1, ref, commit))
+                  continue
+              match = re.fullmatch(rf"chromium/{re.escape(build)}_(\d+)", ref)
+              if match:
+                  candidates.append((int(match.group(1)), ref, commit))
+
+          if not candidates:
+              print(f"no exact chromium/{build} ref candidates found", file=sys.stderr)
+              sys.exit(1)
+
+          _, ref, commit = max(candidates, key=lambda item: item[0])
+          print(f"{ref} {commit}")
+          PY
+          )"
+          BEST_REF="${BEST_REF_AND_COMMIT% *}"
+          BEST_COMMIT="${BEST_REF_AND_COMMIT##* }"
+          BEST_COMMIT_SHORT="${BEST_COMMIT:0:12}"
 
           echo "  ref:     ${BEST_REF}"
-          echo "  commit:  ${BEST_COMMIT:0:12}"
-          echo "ref=${BEST_REF}" >> "$GITHUB_OUTPUT"
-          echo "commit=${BEST_COMMIT:0:12}" >> "$GITHUB_OUTPUT"
+          echo "  commit:  ${BEST_COMMIT_SHORT}"
+          {
+            echo "should_build=true"
+            echo "dawn_ref=${BEST_REF}"
+            echo "dawn_commit=${BEST_COMMIT}"
+            echo "dawn_commit_short=${BEST_COMMIT_SHORT}"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve
+    if: needs.resolve.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -84,8 +214,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Dawn
+        shell: bash
         run: |
+          set -euo pipefail
           git clone --depth=1 -b "${{ needs.resolve.outputs.dawn_ref }}" https://dawn.googlesource.com/dawn dawn
+          cd dawn
+          ACTUAL_COMMIT="$(git rev-parse HEAD)"
+          if [ "${ACTUAL_COMMIT}" != "${{ needs.resolve.outputs.dawn_commit }}" ]; then
+            echo "ERROR: Dawn branch moved during workflow."
+            echo "Expected: ${{ needs.resolve.outputs.dawn_commit }}"
+            echo "Actual:   ${ACTUAL_COMMIT}"
+            exit 1
+          fi
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -167,14 +307,15 @@ jobs:
 
   release:
     needs: [resolve, build]
+    if: needs.resolve.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Determine Dawn commit
-        id: dawn
-        run: |
-          echo "commit=${{ needs.resolve.outputs.dawn_commit }}" >> "$GITHUB_OUTPUT"
+      - name: Checkout package
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -191,10 +332,14 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: dawn-chrome-${{ inputs.chrome_build }}
-          name: Dawn for Chrome ${{ inputs.chrome_build }}
+          tag_name: ${{ needs.resolve.outputs.tag_name }}
+          name: Dawn for Chrome ${{ needs.resolve.outputs.chrome_build }}
           body: |
-            Pre-built Dawn binaries matching Chrome build `${{ inputs.chrome_build }}` (Dawn commit `${{ steps.dawn.outputs.commit }}`).
+            Pre-built Dawn binaries matching Chrome build `${{ needs.resolve.outputs.chrome_build }}`.
+
+            **Chrome source version:** `${{ needs.resolve.outputs.chrome_version }}`
+            **Dawn ref:** `${{ needs.resolve.outputs.dawn_ref }}`
+            **Dawn commit:** `${{ needs.resolve.outputs.dawn_commit }}`
 
             **Platforms:**
             - `macos-aarch64` (Apple Silicon)
@@ -210,3 +355,123 @@ jobs:
 
             **Windows note:** `d3dcompiler_47.dll` is included in `bin/`.
           files: release/*
+          overwrite_files: true
+          fail_on_unmatched_files: true
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Update build.zig.zon
+        shell: bash
+        env:
+          CHROME_BUILD: ${{ needs.resolve.outputs.chrome_build }}
+          TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
+          FETCH_REPOSITORY: ${{ github.repository }}
+          PACKAGE_REPOSITORY: ${{ env.PACKAGE_REPOSITORY }}
+        run: |
+          set -euo pipefail
+
+          : > hashes.txt
+          while read -r DEP FILE; do
+            URL="https://github.com/${FETCH_REPOSITORY}/releases/download/${TAG_NAME}/${FILE}"
+            echo "Fetching Zig hash for ${URL}"
+            HASH=""
+            for ATTEMPT in 1 2 3 4 5; do
+              if HASH="$(zig fetch "${URL}")"; then
+                break
+              fi
+              if [ "${ATTEMPT}" = "5" ]; then
+                echo "ERROR: failed to fetch ${URL}" >&2
+                exit 1
+              fi
+              sleep 10
+            done
+            printf '%s %s %s\n' "${DEP}" "${FILE}" "${HASH}" >> hashes.txt
+          done <<'EOF'
+          dawn-linux-x86_64 dawn-linux-x86_64.tar.gz
+          dawn-windows-x86_64 dawn-windows-x86_64.zip
+          dawn-macos-aarch64 dawn-macos-aarch64.tar.gz
+          dawn-macos-x86_64 dawn-macos-x86_64.tar.gz
+          EOF
+
+          python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ["TAG_NAME"]
+          repository = os.environ["PACKAGE_REPOSITORY"]
+          manifest_path = Path("build.zig.zon")
+          text = manifest_path.read_text()
+
+          replacements = {}
+          for line in Path("hashes.txt").read_text().splitlines():
+              dep, filename, package_hash = line.split()
+              replacements[dep] = (filename, package_hash)
+
+          for dep, (filename, package_hash) in replacements.items():
+              url = f"https://github.com/{repository}/releases/download/{tag}/{filename}"
+              pattern = re.compile(
+                  r'(\.@"' + re.escape(dep) + r'"\s*=\s*\.{\s*\n\s*\.url\s*=\s*")[^"]+'
+                  r'(",\s*\n\s*\.hash\s*=\s*")[^"]+(")',
+                  re.MULTILINE,
+              )
+              text, count = pattern.subn(
+                  lambda match, url=url, package_hash=package_hash: (
+                      f"{match.group(1)}{url}{match.group(2)}{package_hash}{match.group(3)}"
+                  ),
+                  text,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f"failed to update dependency entry: {dep}")
+
+          manifest_path.write_text(text)
+          PY
+
+          zig fmt build.zig.zon
+
+          set +e
+          VALIDATION_OUTPUT="$(zig build --fetch 2>&1)"
+          VALIDATION_STATUS="$?"
+          set -e
+          if [ "${VALIDATION_STATUS}" -ne 0 ]; then
+            printf '%s\n' "${VALIDATION_OUTPUT}"
+            NEW_FINGERPRINT="$(printf '%s\n' "${VALIDATION_OUTPUT}" | sed -n 's/.*use this value: \(0x[0-9a-fA-F]\+\).*/\1/p' | tail -1)"
+            if [ -z "${NEW_FINGERPRINT}" ]; then
+              exit "${VALIDATION_STATUS}"
+            fi
+            NEW_FINGERPRINT="${NEW_FINGERPRINT}" python3 <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("build.zig.zon")
+          text = path.read_text()
+          text, count = re.subn(
+              r"\.fingerprint\s*=\s*0x[0-9a-fA-F]+,",
+              f".fingerprint = {os.environ['NEW_FINGERPRINT']},",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("failed to update build.zig.zon fingerprint")
+          path.write_text(text)
+          PY
+            zig fmt build.zig.zon
+            zig build --fetch
+          fi
+
+          git diff -- build.zig.zon
+          if git diff --quiet -- build.zig.zon; then
+            echo "build.zig.zon is already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add build.zig.zon
+          git commit -m "chore: update Dawn to Chrome ${CHROME_BUILD}"
+          git push
