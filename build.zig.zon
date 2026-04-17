@@ -1,0 +1,33 @@
+.{
+    .name = .webgpu_dawn,
+    .version = "0.0.1",
+    .dependencies = .{
+        .@"dawn-linux-x86_64" = .{
+            .url = "https://github.com/Ariaszzzhc/webgpu-dawn.zig/releases/download/dawn-chrome-7778/dawn-linux-x86_64.tar.gz",
+            .hash = "N-V-__8AAOQDzgLV1PAzIrMoeAonpWzbruyJ4WjDdjvWLOUD",
+            .lazy = true,
+        },
+        .@"dawn-windows-x86_64" = .{
+            .url = "https://github.com/Ariaszzzhc/webgpu-dawn.zig/releases/download/dawn-chrome-7778/dawn-windows-x86_64.zip",
+            .hash = "N-V-__8AAJPtvwGC4_El-rZrGU-FeNYmXdjxR_A_rdweNPnn",
+            .lazy = true,
+        },
+        .@"dawn-macos-aarch64" = .{
+            .url = "https://github.com/Ariaszzzhc/webgpu-dawn.zig/releases/download/dawn-chrome-7778/dawn-macos-aarch64.tar.gz",
+            .hash = "N-V-__8AALO9PwGu2zwh_Wk8-jaxq2IR7mtTS0saMFSI0Q3O",
+            .lazy = true,
+        },
+        .@"dawn-macos-x86_64" = .{
+            .url = "https://github.com/Ariaszzzhc/webgpu-dawn.zig/releases/download/dawn-chrome-7778/dawn-macos-x86_64.tar.gz",
+            .hash = "N-V-__8AABs9bgGfw7c1jpg3iMQ6Srjz3JAbHI4QujtWa7c5",
+            .lazy = true,
+        },
+    },
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+    },
+    .fingerprint = 0x190a4f46cf7bba0d,
+}
