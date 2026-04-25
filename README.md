@@ -45,6 +45,44 @@ const dawn = b.dependency("webgpu_dawn", .{
 exe.root_module.addImport("webgpu-dawn", dawn.module("webgpu-dawn"));
 ```
 
+If the executable is installed or run outside Zig's package cache, install the
+Dawn runtime library next to it:
+
+```zig
+b.installArtifact(exe);
+
+const dawn_runtime = dawn.namedLazyPath("runtime_library");
+const install_dawn_runtime = b.addInstallFileWithDir(
+    dawn_runtime,
+    switch (target.result.os.tag) {
+        .windows => .bin,
+        .linux, .macos => .lib,
+        else => @panic("unsupported webgpu-dawn runtime install target"),
+    },
+    dawn_runtime.basename(b, null),
+);
+b.getInstallStep().dependOn(&install_dawn_runtime.step);
+
+if (target.result.os.tag == .windows) {
+    const d3dcompiler = dawn.namedLazyPath("d3dcompiler_47_dll");
+    const install_d3dcompiler = b.addInstallFileWithDir(
+        d3dcompiler,
+        .bin,
+        d3dcompiler.basename(b, null),
+    );
+    b.getInstallStep().dependOn(&install_d3dcompiler.step);
+}
+```
+
+For a `zig build run` step on Windows, add Dawn's runtime directory to `PATH`:
+
+```zig
+const run_cmd = b.addRunArtifact(exe);
+if (target.result.os.tag == .windows) {
+    run_cmd.addPathDir(dawn.namedLazyPath("runtime_dir").getPath(b));
+}
+```
+
 Then import the translated C API from Zig:
 
 ```zig
@@ -54,6 +92,12 @@ const dawn = @import("webgpu-dawn");
 The module is generated with `translate-c` from Dawn's installed C headers. The
 package also attaches the matching include path, library path, runtime path, and
 `webgpu_dawn` dynamic library link information to the module.
+
+On Windows, importing the module is enough for compilation and linking, but it
+does not copy `webgpu_dawn.dll` into the executable directory. Windows does not
+support rpath, so the DLL must be either installed next to the executable or made
+visible through `PATH`. The package exposes `runtime_library`, `runtime_dir`, and
+`d3dcompiler_47_dll` named lazy paths for that purpose.
 
 ## Dawn Version
 
